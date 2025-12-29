@@ -26,6 +26,7 @@ const CASHFREE_CONFIG = {
 // Create Cashfree order
 async function createCashfreeOrder(orderData) {
   try {
+    console.log("📞 Calling Cashfree API...");
     const response = await axios.post(
       `${CASHFREE_CONFIG.environment}/orders`,
       orderData,
@@ -38,9 +39,13 @@ async function createCashfreeOrder(orderData) {
         },
       }
     );
+    console.log("✅ Cashfree order created successfully");
     return response.data;
   } catch (error) {
-    console.error("Cashfree API error:", error.response?.data || error.message);
+    console.error(
+      "❌ Cashfree API error:",
+      error.response?.data || error.message
+    );
     throw error;
   }
 }
@@ -48,6 +53,7 @@ async function createCashfreeOrder(orderData) {
 // Get order status
 async function getOrderStatus(orderId) {
   try {
+    console.log("🔍 Fetching order status from Cashfree...");
     const response = await axios.get(
       `${CASHFREE_CONFIG.environment}/orders/${orderId}/payments`,
       {
@@ -59,9 +65,13 @@ async function getOrderStatus(orderId) {
         },
       }
     );
+    console.log("✅ Order status fetched");
     return response.data;
   } catch (error) {
-    console.error("Order status error:", error.response?.data || error.message);
+    console.error(
+      "❌ Order status error:",
+      error.response?.data || error.message
+    );
     throw error;
   }
 }
@@ -77,6 +87,9 @@ router.post("/create-order", authenticateToken, async (req, res) => {
     const userEmail = req.user.email;
     const userPhone = req.user.phone;
 
+    console.log("=== Creating Payment Order ===");
+    console.log("User:", { userId, userName, userEmail, userPhone });
+
     // Check if already paid
     const { data: existingPayment } = await supabaseAdmin
       .from("payments")
@@ -87,10 +100,23 @@ router.post("/create-order", authenticateToken, async (req, res) => {
       .single();
 
     if (existingPayment) {
+      console.log("⚠️ User already paid");
       return res.status(400).json({ error: "Joining fee already paid" });
     }
 
+    // Validate environment variables
+    if (!process.env.FRONTEND_URL || !process.env.BACKEND_URL) {
+      console.error("❌ Missing environment variables");
+      return res.status(500).json({ error: "Server configuration error" });
+    }
+
     const orderId = `ORDER_${Date.now()}_${userId.substring(0, 8)}`;
+
+    // Clean phone number
+    let cleanPhone = userPhone.replace(/\D/g, "");
+    if (cleanPhone.length > 10) {
+      cleanPhone = cleanPhone.slice(-10);
+    }
 
     // Create Cashfree order
     const orderRequest = {
@@ -99,19 +125,17 @@ router.post("/create-order", authenticateToken, async (req, res) => {
       order_currency: "INR",
       customer_details: {
         customer_id: userId.substring(0, 20),
-        customer_name: userName,
+        customer_name: userName.substring(0, 50),
         customer_email: userEmail,
-        customer_phone: userPhone,
+        customer_phone: cleanPhone,
       },
       order_meta: {
         return_url: `${process.env.FRONTEND_URL}/payment-success.html?order_id=${orderId}`,
-        notify_url: `${
-          process.env.BACKEND_URL || "http://localhost:3000"
-        }/api/payment/webhook`,
+        notify_url: `${process.env.BACKEND_URL}/api/payment/webhook`,
       },
     };
 
-    console.log("Creating order:", orderRequest);
+    console.log("📦 Order Request:", JSON.stringify(orderRequest, null, 2));
 
     const cashfreeResponse = await createCashfreeOrder(orderRequest);
 
@@ -133,9 +157,11 @@ router.post("/create-order", authenticateToken, async (req, res) => {
       .single();
 
     if (paymentError) {
-      console.error("Payment record error:", paymentError);
+      console.error("❌ Payment record error:", paymentError);
       return res.status(500).json({ error: "Failed to create payment record" });
     }
+
+    console.log("✅ Payment order created successfully");
 
     res.json({
       success: true,
@@ -145,7 +171,7 @@ router.post("/create-order", authenticateToken, async (req, res) => {
       orderCurrency: "INR",
     });
   } catch (error) {
-    console.error("Create order error:", error);
+    console.error("❌ Create order error:", error);
     res.status(500).json({
       error: "Failed to create order",
       details: error.message,
@@ -172,10 +198,10 @@ router.post("/verify-payment", authenticateToken, async (req, res) => {
 
     // Get order status from Cashfree
     const orderStatus = await getOrderStatus(orderId);
-    console.log("Order status:", orderStatus);
+    console.log("📊 Order status:", orderStatus);
 
     if (!orderStatus || orderStatus.length === 0) {
-      return res.status(400).json({ error: "No payment found" });
+      return res.status(400).json({ error: "No payment found for this order" });
     }
 
     const payment = orderStatus[0];
@@ -205,13 +231,13 @@ router.post("/verify-payment", authenticateToken, async (req, res) => {
       .single();
 
     if (paymentError) {
-      console.error("Payment update error:", paymentError);
+      console.error("❌ Payment update error:", paymentError);
       return res.status(500).json({ error: "Failed to update payment" });
     }
 
     console.log("✅ Payment record updated");
 
-    // ✅ STEP 1: Generate Referral Code
+    // Generate unique referral code
     let referralCode = null;
     let codeExists = true;
 
@@ -227,12 +253,13 @@ router.post("/verify-payment", authenticateToken, async (req, res) => {
 
     console.log("✅ Generated referral code:", referralCode);
 
-    // ✅ STEP 2: Activate account & Set referral code
+    // Activate account & Set referral code
     const { error: activationError } = await supabaseAdmin
       .from("users")
       .update({
         is_active: true,
-        referral_code: referralCode, // ✅ SET REFERRAL CODE
+        referral_code: referralCode,
+        updated_at: new Date().toISOString(),
       })
       .eq("id", userId);
 
@@ -243,7 +270,7 @@ router.post("/verify-payment", authenticateToken, async (req, res) => {
 
     console.log("✅ Account activated with referral code:", referralCode);
 
-    // ✅ STEP 3: Credit welcome bonus
+    // Credit welcome bonus
     const { error: bonusError } = await supabaseAdmin.rpc("increment_wallet", {
       user_id_param: userId,
       amount_param: COMMISSION_CONFIG.WELCOME_BONUS,
@@ -257,7 +284,7 @@ router.post("/verify-payment", authenticateToken, async (req, res) => {
       );
     }
 
-    // ✅ STEP 4: Build referral tree
+    // Build referral tree and distribute commissions
     const { data: user } = await supabaseAdmin
       .from("users")
       .select("referred_by")
@@ -280,7 +307,7 @@ router.post("/verify-payment", authenticateToken, async (req, res) => {
     res.json({
       success: true,
       message: "Payment verified successfully! Account activated.",
-      referralCode: referralCode, // ✅ RETURN CODE
+      referralCode: referralCode,
       welcomeBonus: COMMISSION_CONFIG.WELCOME_BONUS,
       accountActivated: true,
     });
@@ -299,7 +326,7 @@ router.post("/verify-payment", authenticateToken, async (req, res) => {
  */
 router.post("/webhook", express.json(), async (req, res) => {
   try {
-    console.log("Webhook received:", req.body);
+    console.log("🔔 Webhook received:", req.body);
     const webhookData = req.body;
 
     if (webhookData.type === "PAYMENT_SUCCESS_WEBHOOK") {
@@ -309,11 +336,13 @@ router.post("/webhook", express.json(), async (req, res) => {
         .from("payments")
         .update({ status: "completed" })
         .eq("transaction_id", orderId);
+
+      console.log("✅ Webhook processed for order:", orderId);
     }
 
     res.status(200).json({ success: true });
   } catch (error) {
-    console.error("Webhook error:", error);
+    console.error("❌ Webhook error:", error);
     res.status(500).json({ error: "Webhook failed" });
   }
 });
@@ -336,7 +365,7 @@ router.get("/history", authenticateToken, async (req, res) => {
 
     res.json({ payments: data });
   } catch (error) {
-    console.error("Payment history error:", error);
+    console.error("❌ Payment history error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
