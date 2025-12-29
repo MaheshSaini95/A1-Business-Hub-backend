@@ -105,9 +105,7 @@ router.post("/create-order", authenticateToken, async (req, res) => {
       },
       order_meta: {
         return_url: `${process.env.FRONTEND_URL}/payment-success.html?order_id=${orderId}`,
-        notify_url: `${
-          process.env.BACKEND_URL || "http://localhost:3000"
-        }/api/payment/webhook`,
+        notify_url: `${process.env.BACKEND_URL}/api/payment/webhook`, // ✅ Fixed
       },
     };
 
