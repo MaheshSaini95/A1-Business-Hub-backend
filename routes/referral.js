@@ -31,7 +31,7 @@ router.get("/team", authenticateToken, async (req, res) => {
         )
       `
       )
-      .eq("ancestor_id", userId)
+      .eq("referrer_id", userId) // ✅ Changed from ancestor_id
       .order("level", { ascending: true });
 
     if (level) {

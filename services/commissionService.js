@@ -1,220 +1,284 @@
 // services/commissionService.js
+
 const { supabaseAdmin } = require("../config/supabase");
 const COMMISSION_CONFIG = require("../config/commissionConfig");
 
 /**
- * Build referral tree when user pays (not registers)
- * @param {string} userId - New user's UUID
- * @param {string} referredByUserId - Sponsor's UUID (not referral code!)
+ * Build referral tree up to 5 levels
  */
-async function buildReferralTree(userId, referredByUserId) {
+async function buildReferralTree(newUserId, referrerId) {
   try {
-    if (!referredByUserId) {
-      console.log("❌ No referrer provided");
-      return;
-    }
+    console.log(`🌳 Building referral tree for user: ${newUserId}`);
 
-    console.log("=== Building Referral Tree ===");
-    console.log("New User ID:", userId);
-    console.log("Referrer UUID:", referredByUserId);
+    let currentReferrerId = referrerId;
+    let level = 1;
+    const relationships = [];
 
-    // ✅ FIX: Get sponsor by UUID, not referral_code
-    const { data: sponsor, error: sponsorError } = await supabaseAdmin
-      .from("users")
-      .select("id, referral_code, name")
-      .eq("id", referredByUserId) // ✅ Changed from referral_code to id
-      .single();
+    while (
+      currentReferrerId &&
+      level <= COMMISSION_CONFIG.MAX_COMMISSION_LEVEL
+    ) {
+      console.log(
+        `  Level ${level}: Adding relationship to ${currentReferrerId}`
+      );
 
-    if (sponsorError || !sponsor) {
-      console.error("❌ Sponsor not found:", sponsorError);
-      return;
-    }
-
-    console.log("✅ Sponsor found:", sponsor.name, sponsor.referral_code);
-
-    // Get sponsor's ancestors (up to level 9)
-    const { data: sponsorAncestors } = await supabaseAdmin
-      .from("referral_tree")
-      .select("*")
-      .eq("user_id", sponsor.id)
-      .lte("level", COMMISSION_CONFIG.MAX_LEVELS - 1);
-
-    console.log(`Found ${sponsorAncestors?.length || 0} ancestors of sponsor`);
-
-    // Insert direct sponsor (level 1)
-    const { error: level1Error } = await supabaseAdmin
-      .from("referral_tree")
-      .insert({
-        user_id: userId,
-        ancestor_id: sponsor.id,
-        level: 1,
+      relationships.push({
+        user_id: newUserId,
+        referrer_id: currentReferrerId,
+        level: level,
       });
 
-    if (level1Error) {
-      console.error("❌ Error inserting level 1:", level1Error);
-      return;
+      // Get next level referrer
+      const { data: referrer } = await supabaseAdmin
+        .from("users")
+        .select("referred_by")
+        .eq("id", currentReferrerId)
+        .single();
+
+      currentReferrerId = referrer?.referred_by;
+      level++;
     }
 
-    console.log("✅ Inserted level 1 relationship");
-
-    // Insert all other ancestors with incremented levels
-    if (sponsorAncestors && sponsorAncestors.length > 0) {
-      const ancestorRecords = sponsorAncestors.map((ancestor) => ({
-        user_id: userId,
-        ancestor_id: ancestor.ancestor_id,
-        level: ancestor.level + 1,
-      }));
-
-      const { error: ancestorsError } = await supabaseAdmin
+    // Insert all relationships at once
+    if (relationships.length > 0) {
+      const { error } = await supabaseAdmin
         .from("referral_tree")
-        .insert(ancestorRecords);
+        .insert(relationships);
 
-      if (ancestorsError) {
-        console.error("❌ Error inserting ancestors:", ancestorsError);
-      } else {
-        console.log(`✅ Inserted ${ancestorRecords.length} ancestor records`);
+      if (error) {
+        console.error("❌ Error building referral tree:", error);
+        throw error;
       }
+
+      console.log(`✅ Referral tree built: ${relationships.length} levels`);
     }
 
-    console.log(`✅ Referral tree built successfully for user ${userId}`);
+    return relationships.length;
   } catch (error) {
-    console.error("❌ Error building referral tree:", error);
+    console.error("❌ buildReferralTree error:", error);
     throw error;
   }
 }
 
 /**
- * Distribute commissions when a new user pays joining fee
- * @param {string} newUserId - UUID of new user who paid
- * @param {string} paymentId - Payment record ID
- * @param {number} joiningAmount - Amount paid (250)
+ * Distribute commissions to upline (5 levels, unlimited width)
  */
-async function distributeCommissions(newUserId, paymentId, joiningAmount) {
+async function distributeCommissions(newUserId, paymentId, joiningFee) {
   try {
-    console.log("=== Distributing Commissions ===");
-    console.log("New User:", newUserId);
-    console.log("Payment ID:", paymentId);
-    console.log("Amount:", joiningAmount);
+    console.log(`💰 Distributing commissions for user: ${newUserId}`);
 
-    // Get all ancestors of the new user from referral_tree
-    const { data: ancestors, error } = await supabaseAdmin
+    // Get all upline members (up to 5 levels)
+    const { data: uplineMembers, error: treeError } = await supabaseAdmin
       .from("referral_tree")
-      .select(
-        `
-        ancestor_id,
-        level,
-        users:ancestor_id (id, referral_code, name, is_active)
-      `
-      )
+      .select("referrer_id, level")
       .eq("user_id", newUserId)
-      .lte("level", COMMISSION_CONFIG.MAX_LEVELS)
+      .lte("level", COMMISSION_CONFIG.MAX_COMMISSION_LEVEL)
       .order("level", { ascending: true });
 
-    if (error) {
-      console.error("❌ Error fetching ancestors:", error);
+    if (treeError) {
+      console.error("❌ Error fetching upline:", treeError);
       return;
     }
 
-    if (!ancestors || ancestors.length === 0) {
-      console.log("❌ No ancestors found in referral tree");
+    if (!uplineMembers || uplineMembers.length === 0) {
+      console.log("⚠️ No upline members found");
       return;
     }
 
-    console.log(`✅ Found ${ancestors.length} ancestors`);
+    console.log(`📊 Found ${uplineMembers.length} upline members`);
 
-    const commissionRecords = [];
-    const walletUpdates = [];
+    const commissions = [];
 
-    for (const ancestor of ancestors) {
-      const level = ancestor.level;
-      const ancestorUser = ancestor.users;
+    for (const member of uplineMembers) {
+      const level = member.level;
+      const commissionData = COMMISSION_CONFIG.COMMISSION_RATES[level];
 
-      // Skip if user is not active
-      if (!ancestorUser || !ancestorUser.is_active) {
-        console.log(`⚠️ Skipping level ${level} - User not active`);
-        continue;
-      }
+      if (!commissionData) continue;
 
-      const config = COMMISSION_CONFIG.LEVEL_COMMISSIONS[level];
-
-      if (!config) {
-        console.log(`⚠️ No commission config for level ${level}`);
-        continue;
-      }
-
-      // Calculate commission amount
-      const commissionAmount = Math.min(
-        (joiningAmount * config.percentage) / 100,
-        config.maxAmount
-      );
+      const commissionAmount = commissionData.amount;
 
       console.log(
-        `✅ Level ${level}: ${ancestorUser.name} gets ₹${commissionAmount}`
+        `  Level ${level} → ₹${commissionAmount} to ${member.referrer_id}`
       );
 
-      // Prepare commission record
-      commissionRecords.push({
-        user_id: ancestor.ancestor_id,
-        source_user_id: newUserId,
-        level: level,
-        amount: commissionAmount,
-        commission_type: level === 1 ? "referral" : "level_income",
-        status: "credited",
-        payment_id: paymentId,
-      });
+      // Credit wallet
+      const { error: walletError } = await supabaseAdmin.rpc(
+        "increment_wallet",
+        {
+          user_id_param: member.referrer_id,
+          amount_param: commissionAmount,
+        }
+      );
 
-      // Prepare wallet update
-      walletUpdates.push({
-        userId: ancestor.ancestor_id,
+      if (walletError) {
+        console.error(
+          `❌ Wallet error for ${member.referrer_id}:`,
+          walletError
+        );
+        continue;
+      }
+
+      // Record commission
+      commissions.push({
+        user_id: member.referrer_id,
+        source_user_id: newUserId,
         amount: commissionAmount,
+        level: level,
+        payment_id: paymentId,
+        commission_type: "referral_commission",
+        status: "completed",
       });
     }
 
-    // Insert all commissions in one go
-    if (commissionRecords.length > 0) {
+    // Insert all commissions
+    if (commissions.length > 0) {
       const { error: commissionError } = await supabaseAdmin
         .from("commissions")
-        .insert(commissionRecords);
+        .insert(commissions);
 
       if (commissionError) {
-        console.error("❌ Error inserting commissions:", commissionError);
-        return;
-      }
-
-      console.log(`✅ Inserted ${commissionRecords.length} commission records`);
-
-      // Update all wallets
-      for (const update of walletUpdates) {
-        const { error: walletError } = await supabaseAdmin.rpc(
-          "increment_wallet",
-          {
-            user_id_param: update.userId,
-            amount_param: update.amount,
-          }
+        console.error("❌ Error recording commissions:", commissionError);
+      } else {
+        console.log(
+          `✅ ${commissions.length} commissions distributed successfully`
         );
-
-        if (walletError) {
-          console.error("❌ Wallet update error:", walletError);
-        } else {
-          console.log(`✅ Wallet updated: ${update.userId} +₹${update.amount}`);
-        }
       }
-
-      console.log(
-        `✅ Distributed ${commissionRecords.length} commissions successfully`
-      );
-    } else {
-      console.log("❌ No commissions to distribute");
     }
 
-    return commissionRecords;
+    // Check and distribute rewards
+    await checkAndDistributeRewards(uplineMembers.map((m) => m.referrer_id));
   } catch (error) {
-    console.error("❌ Error distributing commissions:", error);
-    throw error;
+    console.error("❌ distributeCommissions error:", error);
+  }
+}
+
+/**
+ * Check and distribute rewards based on team milestones
+ */
+async function checkAndDistributeRewards(userIds) {
+  try {
+    for (const userId of userIds) {
+      // Check Level 1 rewards (Direct referrals)
+      await checkLevel1Rewards(userId);
+
+      // Check Level 2 rewards (Indirect referrals)
+      await checkLevel2Rewards(userId);
+    }
+  } catch (error) {
+    console.error("❌ checkAndDistributeRewards error:", error);
+  }
+}
+
+/**
+ * Check Level 1 (Direct) rewards
+ */
+async function checkLevel1Rewards(userId) {
+  try {
+    // Count direct active referrals
+    const { count: directCount } = await supabaseAdmin
+      .from("referral_tree")
+      .select("*", { count: "exact", head: true })
+      .eq("referrer_id", userId)
+      .eq("level", 1);
+
+    if (!directCount) return;
+
+    // Get already claimed rewards
+    const { data: claimedRewards } = await supabaseAdmin
+      .from("rewards")
+      .select("milestone_teams")
+      .eq("user_id", userId)
+      .eq("level", 1);
+
+    const claimedTeams = claimedRewards?.map((r) => r.milestone_teams) || [];
+
+    // Check each milestone
+    for (const milestone of COMMISSION_CONFIG.REWARDS.LEVEL_1) {
+      if (
+        directCount >= milestone.teams &&
+        !claimedTeams.includes(milestone.teams)
+      ) {
+        console.log(
+          `🎁 Rewarding ${userId}: Level 1, ${milestone.teams} teams → ₹${milestone.reward}`
+        );
+
+        // Credit reward
+        await supabaseAdmin.rpc("increment_wallet", {
+          user_id_param: userId,
+          amount_param: milestone.reward,
+        });
+
+        // Record reward
+        await supabaseAdmin.from("rewards").insert({
+          user_id: userId,
+          level: 1,
+          milestone_teams: milestone.teams,
+          reward_amount: milestone.reward,
+          reward_title: milestone.title,
+        });
+      }
+    }
+  } catch (error) {
+    console.error("❌ checkLevel1Rewards error:", error);
+  }
+}
+
+/**
+ * Check Level 2 (Indirect) rewards
+ */
+async function checkLevel2Rewards(userId) {
+  try {
+    // Count level 2 active referrals
+    const { count: level2Count } = await supabaseAdmin
+      .from("referral_tree")
+      .select("*", { count: "exact", head: true })
+      .eq("referrer_id", userId)
+      .eq("level", 2);
+
+    if (!level2Count) return;
+
+    // Get already claimed rewards
+    const { data: claimedRewards } = await supabaseAdmin
+      .from("rewards")
+      .select("milestone_teams")
+      .eq("user_id", userId)
+      .eq("level", 2);
+
+    const claimedTeams = claimedRewards?.map((r) => r.milestone_teams) || [];
+
+    // Check each milestone
+    for (const milestone of COMMISSION_CONFIG.REWARDS.LEVEL_2) {
+      if (
+        level2Count >= milestone.teams &&
+        !claimedTeams.includes(milestone.teams)
+      ) {
+        console.log(
+          `🎁 Rewarding ${userId}: Level 2, ${milestone.teams} teams → ₹${milestone.reward}`
+        );
+
+        // Credit reward
+        await supabaseAdmin.rpc("increment_wallet", {
+          user_id_param: userId,
+          amount_param: milestone.reward,
+        });
+
+        // Record reward
+        await supabaseAdmin.from("rewards").insert({
+          user_id: userId,
+          level: 2,
+          milestone_teams: milestone.teams,
+          reward_amount: milestone.reward,
+          reward_title: milestone.title,
+        });
+      }
+    }
+  } catch (error) {
+    console.error("❌ checkLevel2Rewards error:", error);
   }
 }
 
 module.exports = {
   buildReferralTree,
   distributeCommissions,
+  checkAndDistributeRewards,
 };

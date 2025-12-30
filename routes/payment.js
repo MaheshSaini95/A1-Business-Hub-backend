@@ -118,10 +118,11 @@ router.post("/create-order", authenticateToken, async (req, res) => {
       cleanPhone = cleanPhone.slice(-10);
     }
 
-    // Create Cashfree order
+    // Find the orderRequest section and update it:
+
     const orderRequest = {
       order_id: orderId,
-      order_amount: COMMISSION_CONFIG.JOINING_FEE,
+      order_amount: COMMISSION_CONFIG.JOINING_FEE, // Now ₹295
       order_currency: "INR",
       customer_details: {
         customer_id: userId.substring(0, 20),
