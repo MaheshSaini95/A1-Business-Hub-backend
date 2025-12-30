@@ -131,8 +131,8 @@ router.post("/create-order", authenticateToken, async (req, res) => {
         customer_phone: cleanPhone,
       },
       order_meta: {
-        return_url: `${process.env.FRONTEND_URL}/payment-success.html?order_id=${orderId}`,
-        notify_url: `${process.env.BACKEND_URL}/api/payment/webhook`,
+        return_url: `https://vk-marketing.netlify.app/payment-success.html?order_id=${orderId}`,
+        notify_url: `https://a1-business-hub-backend.onrender.com/api/payment/webhook`,
       },
     };
 
