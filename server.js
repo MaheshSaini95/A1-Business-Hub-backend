@@ -1,65 +1,101 @@
 // server.js
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-require("dotenv").config();
 
+const app = express();
+
+// ============ CORS Configuration (FIXED) ============
+const allowedOrigins = [
+  "http://localhost:5500",
+  "http://127.0.0.1:5500",
+  "http://localhost:5501",
+  "http://127.0.0.1:5501",
+  "http://localhost:3000",
+  "https://a1hub.netlify.app",
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log("❌ CORS blocked origin:", origin);
+      callback(null, true); // Allow anyway for development
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "Cache-Control", // ✅ Added this
+    "Pragma", // ✅ Added this
+    "Expires", // ✅ Added this
+  ],
+  exposedHeaders: ["Content-Length", "Content-Type"],
+};
+
+app.use(cors(corsOptions));
+
+// ============ Middleware ============
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// ============ Request Logger ============
+app.use((req, res, next) => {
+  console.log(`📥 ${req.method} ${req.path}`);
+  next();
+});
+
+// ============ Routes ============
 const authRoutes = require("./routes/auth");
 const paymentRoutes = require("./routes/payment");
 const userRoutes = require("./routes/user");
 const referralRoutes = require("./routes/referral");
+const walletRoutes = require("./routes/wallet");
 const withdrawalRoutes = require("./routes/withdrawal");
+const adminRoutes = require("./routes/admin");
 
-const app = express();
+app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/payment", paymentRoutes);
+app.use("/api/user", userRoutes);
+app.use("/api/referral", referralRoutes);
+app.use("/api/wallet", walletRoutes);
+app.use("/api/withdrawal", withdrawalRoutes);
 
-// CORS Configuration for Netlify
-const corsOptions = {
-  origin: [
-    "http://localhost:5500",
-    "http://127.0.0.1:5500",
-    process.env.FRONTEND_URL || "https://your-site.netlify.app",
-  ],
-  credentials: true,
-  optionsSuccessStatus: 200,
-};
-
-app.use(cors(corsOptions));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Health check endpoint
+// ============ Health Check ============
 app.get("/", (req, res) => {
   res.json({
-    status: "A1 Business Hub Backend API Running",
-    version: "1.0.0",
+    status: "✅ MLM Server Running",
     timestamp: new Date().toISOString(),
   });
 });
 
-app.get("/health", (req, res) => {
-  res.json({ status: "OK", uptime: process.uptime() });
-});
-
-// API Routes
-app.use("/api/auth", authRoutes);
-app.use("/api/payment", paymentRoutes);
-app.use("/api/user", userRoutes);
-app.use("/api/referral", referralRoutes);
-app.use("/api/withdrawal", withdrawalRoutes);
-
-// 404 Handler
+// ============ 404 Handler ============
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
 });
 
-// Error Handler
+// ============ Error Handler ============
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error("❌ Server Error:", err);
   res.status(500).json({ error: "Internal server error" });
 });
 
+// ============ Start Server ============
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📝 Environment: ${process.env.NODE_ENV || "development"}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("=".repeat(50));
+  console.log(`🚀 MLM Backend Server Running`);
+  console.log(`📍 Port: ${PORT}`);
+  console.log(`🌐 URL: http://localhost:${PORT}`);
+  console.log(`✅ CORS enabled`);
+  console.log("=".repeat(50));
 });
+
+module.exports = app;

@@ -2,13 +2,30 @@
 const { createClient } = require("@supabase/supabase-js");
 
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
 
-// Service role client (bypass RLS for server operations)
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+console.log("🔍 Supabase config check:");
+console.log("SUPABASE_URL:", supabaseUrl ? "✅ Loaded" : "❌ Missing");
+console.log("SUPABASE_SERVICE_KEY:", supabaseKey ? "✅ Loaded" : "❌ Missing");
 
-// Regular client (with RLS)
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+if (!supabaseUrl || !supabaseKey) {
+  console.error(`
+❌ SUPABASE CONFIG ERROR!
+1. Check .env file exists in project root
+2. SUPABASE_URL=https://your-project.supabase.co
+3. SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIs... (Service Role Key)
 
-module.exports = { supabase, supabaseAdmin };
+Get from: Supabase Dashboard → Settings → API
+  `);
+  process.exit(1);
+}
+
+const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false,
+  },
+});
+
+console.log("✅ Supabase Admin client created");
+module.exports = { supabaseAdmin };

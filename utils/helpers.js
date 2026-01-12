@@ -8,14 +8,20 @@ function generateReferralCode() {
   return code;
 }
 
-function generateTransactionId() {
-  return `TXN_${Date.now()}_${Math.random()
-    .toString(36)
-    .substring(7)
-    .toUpperCase()}`;
+async function ensureUniqueReferralCode() {
+  const { supabaseAdmin } = require("../config/supabase");
+
+  for (let i = 0; i < 10; i++) {
+    const code = generateReferralCode();
+    const { data } = await supabaseAdmin
+      .from("users")
+      .select("id")
+      .eq("referral_code", code)
+      .maybeSingle();
+
+    if (!data) return code;
+  }
+  throw new Error("Could not generate unique code");
 }
 
-module.exports = {
-  generateReferralCode,
-  generateTransactionId,
-};
+module.exports = { generateReferralCode, ensureUniqueReferralCode };
