@@ -7,6 +7,64 @@ const COMMISSION_CONFIG = require("../config/commissionConfig"); // ✅ Import f
 const router = express.Router();
 
 /**
+ * GET /api/user/recent-activity
+ * Get recent joining users and withdrawals for ticker
+ */
+router.get("/recent-activity", authenticateToken, async (req, res) => {
+  try {
+    // Get recent 10 active users (joined recently)
+    const { data: recentJoins, error: joinsError } = await supabaseAdmin
+      .from("users")
+      .select("name, created_at")
+      .eq("is_active", true)
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (joinsError) throw joinsError;
+
+    // Get recent 10 approved withdrawals
+    const { data: recentWithdrawals, error: withdrawalsError } =
+      await supabaseAdmin
+        .from("withdrawal_requests")
+        .select(
+          `
+        amount,
+        processed_at,
+        users (name)
+      `
+        )
+        .eq("status", "approved")
+        .order("processed_at", { ascending: false })
+        .limit(10);
+
+    if (withdrawalsError) throw withdrawalsError;
+
+    // Format data
+    const joins = (recentJoins || []).map((u) => ({
+      type: "join",
+      name: u.name,
+      timestamp: u.created_at,
+    }));
+
+    const withdrawals = (recentWithdrawals || []).map((w) => ({
+      type: "withdrawal",
+      name: w.users?.name || "User",
+      amount: w.amount,
+      timestamp: w.processed_at,
+    }));
+
+    // Combine and sort by time
+    const activities = [...joins, ...withdrawals]
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .slice(0, 15); // Keep only 15 most recent
+
+    res.json({ activities });
+  } catch (err) {
+    console.error("❌ Recent activity error:", err);
+    res.status(500).json({ error: "Failed to fetch activity" });
+  }
+});
+/**
  * GET /api/user/profile
  */
 router.get("/profile", authenticateToken, async (req, res) => {

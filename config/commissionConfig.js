@@ -35,11 +35,11 @@ module.exports = {
     LEVEL_7: [{ teams: 93150, reward: 375000, title: "manali tour - ₹375000" }],
     LEVEL_8: [{ teams: 468750, reward: 1875000, title: "goa tour - ₹1875000" }],
     LEVEL_9: [
-      { teams: 2343750, reward: 9375000, title: "thailand tour - ₹9375000" },
+      { teams: 2343750, reward: 9375000, title: "Thailand tour - ₹9375000" },
     ],
     LEVEL_10: [
       {
-        teams: 1178750,
+        teams: 11718750,
         reward: 46875000,
         title: "Dubai tour + sport bike - ₹46875000",
       },

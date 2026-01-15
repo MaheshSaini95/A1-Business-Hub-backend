@@ -19,10 +19,10 @@ router.post("/request", authenticateToken, async (req, res) => {
     console.log("🏦 Bank Details:", bankDetails);
 
     // Validate amount
-    if (!amount || amount < 250) {
+    if (!amount || amount < 100) {
       return res
         .status(400)
-        .json({ error: "Minimum withdrawal amount is ₹250" });
+        .json({ error: "Minimum withdrawal amount is ₹100" });
     }
 
     // Validate bank details

@@ -433,4 +433,73 @@ router.post(
   }
 );
 
+/**
+ * GET /api/admin/activation-requests (with filter)
+ */
+router.get(
+  "/activation-requests",
+  authenticateToken,
+  adminOnly,
+  async (req, res) => {
+    try {
+      const filter = req.query.filter || "all";
+      console.log(
+        `📊 Admin fetching activation requests (filter: ${filter})...`
+      );
+
+      let query = supabaseAdmin
+        .from("payments")
+        .select(
+          `
+          id, user_id, amount, status, payment_mode, payment_type, created_at,
+          users (id, name, email, referred_by)
+        `
+        )
+        .eq("payment_type", "joining_fee")
+        .eq("payment_mode", "manual_qr")
+        .order("created_at", { ascending: false });
+
+      // ✅ Apply filter
+      if (filter !== "all") {
+        query = query.eq("status", filter);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      console.log(`✅ Found ${data?.length || 0} requests`);
+      res.json({ requests: data || [] });
+    } catch (err) {
+      console.error("❌ Activation requests error:", err);
+      res.status(500).json({ error: "Failed to fetch requests" });
+    }
+  }
+);
+
+/**
+ * GET /api/admin/users
+ * Get all users with stats
+ */
+router.get("/users", authenticateToken, adminOnly, async (req, res) => {
+  try {
+    console.log("👥 Admin fetching all users...");
+
+    const { data, error } = await supabaseAdmin
+      .from("users")
+      .select(
+        "id, name, email, phone, wallet_balance, total_earnings, total_withdrawn, is_active, created_at"
+      )
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    console.log(`✅ Found ${data?.length || 0} users`);
+    res.json({ users: data || [] });
+  } catch (err) {
+    console.error("❌ Users fetch error:", err);
+    res.status(500).json({ error: "Failed to fetch users" });
+  }
+});
+
 module.exports = router;
