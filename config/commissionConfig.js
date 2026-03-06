@@ -2,9 +2,9 @@
 
 module.exports = {
   // Joining fee with GST
-  JOINING_FEE_BASE: 250,
+  JOINING_FEE_BASE: 1,
   GST_RATE: 0.18, // 18%
-  JOINING_FEE: 295, // 250 + 18% = 295
+  JOINING_FEE: 1, // 250 + 18% = 295
 
   // Welcome bonus
   WELCOME_BONUS: 50,
@@ -16,11 +16,18 @@ module.exports = {
     3: { rate: 0.06, amount: 15 }, // 6% or ₹15
     4: { rate: 0.04, amount: 10 }, // 4% or ₹10
     5: { rate: 0.02, amount: 5 }, // 2% or ₹5
+
     6: { rate: 0.004, amount: 3 }, // 2% or ₹5
     7: { rate: 0.004, amount: 3 }, // 2% or ₹5
     8: { rate: 0.004, amount: 2 }, // 2% or ₹5
     9: { rate: 0.004, amount: 2 }, // 2% or ₹5
     10: { rate: 0.004, amount: 2 }, // 2% or ₹5
+
+    6: { rate: 0.004, amount: 1 }, // 0.40% or ₹1
+    7: { rate: 0.004, amount: 1 }, // 0.40% or ₹1
+    8: { rate: 0.004, amount: 1 }, // 0.40% or ₹1
+    9: { rate: 0.004, amount: 1 }, // 0.40% or ₹1
+    10: { rate: 0.004, amount: 1 }, // 0.40% or ₹1
   },
   MAX_COMMISSION_LEVEL: 10,
 
@@ -28,11 +35,19 @@ module.exports = {
   REWARDS: {
     LEVEL_1: [{ teams: 5, reward: 50, title: "Level 1 - ₹50" }],
     LEVEL_2: [{ teams: 25, reward: 200, title: "Level 2 - ₹200" }],
+
     LEVEL_3: [{ teams: 125, reward: 600, title: "Level 3 - ₹600" }],
     LEVEL_4: [{ teams: 750, reward: 3000, title: "Smart watch - ₹3000" }],
     LEVEL_5: [{ teams: 3750, reward: 15000, title: "Boat speaker - ₹15000" }],
     LEVEL_6: [{ teams: 18750, reward: 75000, title: "Smart mobile - ₹75000" }],
     LEVEL_7: [{ teams: 93750, reward: 375000, title: "manali tour - ₹375000" }],
+
+    LEVEL_3: [{ teams: 125, reward: 600, title: "Starter - ₹600" }],
+    LEVEL_4: [{ teams: 750, reward: 3000, title: "Smart watch- ₹3000" }],
+    LEVEL_5: [{ teams: 3750, reward: 15000, title: "Boat Speaker - ₹15000" }],
+    LEVEL_6: [{ teams: 18750, reward: 75000, title: "Smart mobile - ₹75000" }],
+    LEVEL_7: [{ teams: 93150, reward: 375000, title: "manali tour - ₹375000" }],
+
     LEVEL_8: [{ teams: 468750, reward: 1875000, title: "goa tour - ₹1875000" }],
     LEVEL_9: [
       { teams: 2343750, reward: 9375000, title: "Thailand tour - ₹9375000" },
