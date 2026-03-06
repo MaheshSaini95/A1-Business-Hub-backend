@@ -1,28 +1,18 @@
-// routes/payment.js - REPLACE ENTIRE FILE
+// routes/payment.js
 const express = require("express");
- 
 const crypto = require("crypto");
 const Razorpay = require("razorpay");
- 
 const { supabaseAdmin } = require("../config/supabase");
 const { authenticateToken } = require("../middleware/auth");
+const {
+  buildReferralTree,
+  distributeCommissions,
+} = require("../services/commissionService");
+const COMMISSION_CONFIG = require("../config/commissionConfig");
+const { generateReferralCode } = require("../utils/helpers");
 
 const router = express.Router();
 
- 
-router.post("/manual-request", authenticateToken, async (req, res) => {
-  try {
-    console.log("📥 /payment/manual-request HIT");
-    console.log("req.user:", req.user);
-
-    // ✅ Now works - req.user.userId exists
-    const userId = req.user.userId;
-    const { amount, paymentType } = req.body;
-
-    const finalAmount = amount || 295;
-
-    // Get user details
- 
 // Razorpay configuration
 const razorpayInstance = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -31,7 +21,6 @@ const razorpayInstance = new Razorpay({
 
 /**
  * POST /api/payment/create-order
- * Create Razorpay payment order
  */
 router.post("/create-order", authenticateToken, async (req, res) => {
   try {
@@ -76,7 +65,6 @@ router.post("/create-order", authenticateToken, async (req, res) => {
       cleanPhone = cleanPhone.slice(-10);
     }
 
-    // Razorpay order options (amount in paise)
     const amountInPaise = COMMISSION_CONFIG.JOINING_FEE * 100;
 
     const options = {
@@ -105,7 +93,7 @@ router.post("/create-order", authenticateToken, async (req, res) => {
         amount: COMMISSION_CONFIG.JOINING_FEE,
         payment_type: "joining_fee",
         status: "pending",
-        transaction_id: orderId, // internal reference
+        transaction_id: orderId,
         metadata: {
           razorpay_order_id: razorpayOrder.id,
         },
@@ -120,10 +108,9 @@ router.post("/create-order", authenticateToken, async (req, res) => {
 
     console.log("✅ Payment order created successfully (DB record)");
 
-    // Send data to frontend for Checkout
     res.json({
       success: true,
-      orderId: orderId, // internal
+      orderId: orderId,
       razorpayOrderId: razorpayOrder.id,
       amount: COMMISSION_CONFIG.JOINING_FEE,
       currency: "INR",
@@ -145,7 +132,6 @@ router.post("/create-order", authenticateToken, async (req, res) => {
 
 /**
  * POST /api/payment/verify-razorpay
- * Verify Razorpay payment and activate account
  */
 router.post("/verify-razorpay", authenticateToken, async (req, res) => {
   try {
@@ -169,11 +155,6 @@ router.post("/verify-razorpay", authenticateToken, async (req, res) => {
     console.log("=== Razorpay Payment Verification ===");
     console.log("Order ID (internal):", orderId);
     console.log("User ID:", userId);
-    console.log("Razorpay:", {
-      razorpay_order_id,
-      razorpay_payment_id,
-      razorpay_signature,
-    });
 
     // Verify signature
     const generatedSignature = crypto
@@ -253,63 +234,34 @@ router.post("/verify-razorpay", authenticateToken, async (req, res) => {
     if (bonusError) {
       console.error("❌ Bonus credit error:", bonusError);
     } else {
-      console.log(
-        "✅ Welcome bonus credited: ₹" + COMMISSION_CONFIG.WELCOME_BONUS,
-      );
+      console.log("✅ Welcome bonus credited: ₹" + COMMISSION_CONFIG.WELCOME_BONUS);
     }
 
     // Build referral tree and distribute commissions
- 
     const { data: user } = await supabaseAdmin
       .from("users")
-      .select("id, name")
+      .select("referred_by")
       .eq("id", userId)
       .single();
 
-    // Create payment record
-    const { data: payment, error } = await supabaseAdmin
-      .from("payments")
-      .insert({
-        user_id: userId,
-        amount: finalAmount,
-        payment_type: paymentType || "joining_fee",
-        payment_mode: "manual_qr",
-        status: "pending",
-      })
-      .select("id")
-      .single();
-
- 
-    if (error) {
-      console.error("❌ Payment error:", error);
-      return res.status(500).json({ error: "Database error" });
- 
+    if (user?.referred_by) {
+      console.log("✅ Building referral tree for referrer:", user.referred_by);
       await buildReferralTree(userId, user.referred_by);
       await distributeCommissions(
         userId,
         paymentRecord.id,
-        COMMISSION_CONFIG.JOINING_FEE,
+        COMMISSION_CONFIG.JOINING_FEE
       );
-
       console.log("✅ Referral tree built and commissions distributed");
- 
     }
-
-    console.log(`✅ Payment created: ID ${payment.id} for ${user.name}`);
 
     res.json({
       success: true,
-      paymentId: payment.id,
-      userId,
-      name: user.name,
-      amount: finalAmount,
-      status: "pending",
+      message: "Payment verified successfully! Account activated.",
+      referralCode: referralCode,
+      welcomeBonus: COMMISSION_CONFIG.WELCOME_BONUS,
+      accountActivated: true,
     });
- 
-  } catch (err) {
-    console.error("❌ Payment endpoint error:", err);
-    res.status(500).json({ error: "Server error" });
- 
   } catch (error) {
     console.error("❌ Razorpay verification error:", error);
     res.status(500).json({
@@ -321,7 +273,6 @@ router.post("/verify-razorpay", authenticateToken, async (req, res) => {
 
 /**
  * GET /api/payment/history
- * Get payment history
  */
 router.get("/history", authenticateToken, async (req, res) => {
   try {
@@ -339,7 +290,6 @@ router.get("/history", authenticateToken, async (req, res) => {
   } catch (error) {
     console.error("❌ Payment history error:", error);
     res.status(500).json({ error: "Internal server error" });
- 
   }
 });
 
