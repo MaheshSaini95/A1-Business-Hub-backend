@@ -23,11 +23,7 @@ module.exports = {
     9: { rate: 0.004, amount: 2 }, // 2% or ₹5
     10: { rate: 0.004, amount: 2 }, // 2% or ₹5
 
-    6: { rate: 0.004, amount: 1 }, // 0.40% or ₹1
-    7: { rate: 0.004, amount: 1 }, // 0.40% or ₹1
-    8: { rate: 0.004, amount: 1 }, // 0.40% or ₹1
-    9: { rate: 0.004, amount: 1 }, // 0.40% or ₹1
-    10: { rate: 0.004, amount: 1 }, // 0.40% or ₹1
+   
   },
   MAX_COMMISSION_LEVEL: 10,
 
