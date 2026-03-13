@@ -13,7 +13,7 @@ const { generateReferralCode } = require("../utils/helpers");
 
 const router = express.Router();
 
-// Razorpay configuration
+// Razorpay instance
 const razorpayInstance = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_SECRET_KEY,
@@ -32,14 +32,18 @@ router.post("/create-order", authenticateToken, async (req, res) => {
     console.log("=== Creating Razorpay Payment Order ===");
     console.log("User:", { userId, userName, userEmail, userPhone });
 
+    if (!userId) {
+      return res.status(400).json({ error: "User ID missing from token" });
+    }
+
     // Check if already paid
     const { data: existingPayment } = await supabaseAdmin
       .from("payments")
-      .select("*")
+      .select("id")
       .eq("user_id", userId)
       .eq("payment_type", "joining_fee")
       .eq("status", "completed")
-      .single();
+      .maybeSingle();
 
     if (existingPayment) {
       console.log("⚠️ User already paid");
@@ -83,9 +87,16 @@ router.post("/create-order", authenticateToken, async (req, res) => {
     console.log("📦 Razorpay Order Options:", JSON.stringify(options, null, 2));
 
     const razorpayOrder = await razorpayInstance.orders.create(options);
-    console.log("✅ Razorpay order created:", razorpayOrder);
+    console.log("✅ Razorpay order created:", razorpayOrder.id);
 
-    // Save to database
+    // Save to database — delete any old pending order first
+    await supabaseAdmin
+      .from("payments")
+      .delete()
+      .eq("user_id", userId)
+      .eq("payment_type", "joining_fee")
+      .eq("status", "pending");
+
     const { data: payment, error: paymentError } = await supabaseAdmin
       .from("payments")
       .insert({
@@ -106,7 +117,7 @@ router.post("/create-order", authenticateToken, async (req, res) => {
       return res.status(500).json({ error: "Failed to create payment record" });
     }
 
-    console.log("✅ Payment order created successfully (DB record)");
+    console.log("✅ Payment order created successfully");
 
     res.json({
       success: true,
@@ -141,6 +152,7 @@ router.post("/verify-razorpay", authenticateToken, async (req, res) => {
       razorpay_signature,
       orderId,
     } = req.body;
+
     const userId = req.user.id;
 
     if (
@@ -153,10 +165,10 @@ router.post("/verify-razorpay", authenticateToken, async (req, res) => {
     }
 
     console.log("=== Razorpay Payment Verification ===");
-    console.log("Order ID (internal):", orderId);
+    console.log("Internal Order ID:", orderId);
     console.log("User ID:", userId);
 
-    // Verify signature
+    // ✅ Verify signature
     const generatedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_SECRET_KEY)
       .update(razorpay_order_id + "|" + razorpay_payment_id)
@@ -164,12 +176,12 @@ router.post("/verify-razorpay", authenticateToken, async (req, res) => {
 
     if (generatedSignature !== razorpay_signature) {
       console.error("❌ Signature verification failed");
-      return res.status(400).json({ error: "Payment verification failed" });
+      return res.status(400).json({ error: "Payment signature invalid" });
     }
 
     console.log("✅ Razorpay signature verified");
 
-    // Update payment record
+    // ✅ Update payment record to completed
     const { data: paymentRecord, error: paymentError } = await supabaseAdmin
       .from("payments")
       .update({
@@ -185,30 +197,30 @@ router.post("/verify-razorpay", authenticateToken, async (req, res) => {
       .select()
       .single();
 
-    if (paymentError) {
+    if (paymentError || !paymentRecord) {
       console.error("❌ Payment update error:", paymentError);
-      return res.status(500).json({ error: "Failed to update payment" });
+      return res.status(500).json({ error: "Failed to update payment record" });
     }
 
-    console.log("✅ Payment record updated");
+    console.log("✅ Payment record updated, ID:", paymentRecord.id);
 
-    // Generate unique referral code
+    // ✅ Generate unique referral code
     let referralCode = null;
-    let codeExists = true;
-
-    while (codeExists) {
-      referralCode = generateReferralCode();
-      const { data } = await supabaseAdmin
+    let attempts = 0;
+    while (!referralCode && attempts < 10) {
+      attempts++;
+      const code = generateReferralCode();
+      const { data: existing } = await supabaseAdmin
         .from("users")
         .select("id")
-        .eq("referral_code", referralCode)
-        .single();
-      codeExists = !!data;
+        .eq("referral_code", code)
+        .maybeSingle();
+      if (!existing) referralCode = code;
     }
 
     console.log("✅ Generated referral code:", referralCode);
 
-    // Activate account & Set referral code
+    // ✅ Activate user account
     const { error: activationError } = await supabaseAdmin
       .from("users")
       .update({
@@ -223,42 +235,66 @@ router.post("/verify-razorpay", authenticateToken, async (req, res) => {
       return res.status(500).json({ error: "Failed to activate account" });
     }
 
-    console.log("✅ Account activated with referral code:", referralCode);
+    console.log("✅ Account activated:", userId);
 
-    // Credit welcome bonus
+    // ✅ Credit welcome bonus
     const { error: bonusError } = await supabaseAdmin.rpc("increment_wallet", {
       user_id_param: userId,
       amount_param: COMMISSION_CONFIG.WELCOME_BONUS,
     });
 
     if (bonusError) {
-      console.error("❌ Bonus credit error:", bonusError);
+      console.error("❌ Welcome bonus error:", bonusError);
     } else {
-      console.log("✅ Welcome bonus credited: ₹" + COMMISSION_CONFIG.WELCOME_BONUS);
+      console.log("✅ Welcome bonus credited ₹" + COMMISSION_CONFIG.WELCOME_BONUS);
     }
 
-    // Build referral tree and distribute commissions
-    const { data: user } = await supabaseAdmin
+    // ✅ Record welcome bonus in commissions table
+    await supabaseAdmin.from("commissions").insert({
+      user_id: userId,
+      source_user_id: userId,
+      amount: COMMISSION_CONFIG.WELCOME_BONUS,
+      level: 0,
+      payment_id: paymentRecord.id,
+      commission_type: "welcome_bonus",
+      status: "completed",
+    });
+
+    // ✅ Fetch referred_by to distribute commissions
+    const { data: userRecord } = await supabaseAdmin
       .from("users")
       .select("referred_by")
       .eq("id", userId)
       .single();
 
-    if (user?.referred_by) {
-      console.log("✅ Building referral tree for referrer:", user.referred_by);
-      await buildReferralTree(userId, user.referred_by);
-      await distributeCommissions(
-        userId,
-        paymentRecord.id,
-        COMMISSION_CONFIG.JOINING_FEE
-      );
-      console.log("✅ Referral tree built and commissions distributed");
+    if (userRecord?.referred_by) {
+      console.log("🌳 Processing referral commissions...");
+      try {
+        // ✅ FIX: Delete existing referral_tree rows before inserting (avoid 23505)
+        await supabaseAdmin
+          .from("referral_tree")
+          .delete()
+          .eq("user_id", userId);
+
+        await buildReferralTree(userId, userRecord.referred_by);
+        await distributeCommissions(
+          userId,
+          paymentRecord.id,
+          COMMISSION_CONFIG.JOINING_FEE
+        );
+        console.log("✅ Referral tree built and commissions distributed");
+      } catch (refErr) {
+        // ⚠️ Don't fail the whole payment if commission fails
+        console.error("❌ Referral commission error (non-fatal):", refErr.message);
+      }
+    } else {
+      console.log("ℹ️ No referrer found, skipping commission distribution");
     }
 
     res.json({
       success: true,
-      message: "Payment verified successfully! Account activated.",
-      referralCode: referralCode,
+      message: "Payment verified! Account activated.",
+      referralCode,
       welcomeBonus: COMMISSION_CONFIG.WELCOME_BONUS,
       accountActivated: true,
     });
@@ -286,7 +322,7 @@ router.get("/history", authenticateToken, async (req, res) => {
       return res.status(500).json({ error: "Failed to fetch payments" });
     }
 
-    res.json({ payments: data });
+    res.json({ payments: data || [] });
   } catch (error) {
     console.error("❌ Payment history error:", error);
     res.status(500).json({ error: "Internal server error" });
