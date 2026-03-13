@@ -2,12 +2,16 @@
 const { supabaseAdmin } = require("../config/supabase");
 const COMMISSION_CONFIG = require("../config/commissionConfig");
 
-/**
- * Build referral tree for new user (up to 10 levels)
- */
+ 
 async function buildReferralTree(newUserId, referrerId) {
   try {
     console.log(`🌳 Building referral tree for user: ${newUserId}`);
+
+    // ✅ Cleanup existing tree for this user (avoid duplicate key)
+    await supabaseAdmin
+      .from("referral_tree")
+      .delete()
+      .eq("user_id", newUserId);
 
     let currentReferrerId = referrerId;
     let level = 1;
@@ -17,7 +21,7 @@ async function buildReferralTree(newUserId, referrerId) {
       currentReferrerId &&
       level <= COMMISSION_CONFIG.MAX_COMMISSION_LEVEL
     ) {
-      console.log(`  Level ${level}: Adding to ${currentReferrerId}`);
+      console.log(` Level ${level}: Adding to ${currentReferrerId}`);
 
       relationships.push({
         user_id: newUserId,
@@ -56,6 +60,7 @@ async function buildReferralTree(newUserId, referrerId) {
     throw error;
   }
 }
+
 
 /**
  * Distribute commissions to upline (10 levels)
