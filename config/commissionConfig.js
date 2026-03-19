@@ -4,7 +4,7 @@ module.exports = {
   // Joining fee with GST
   JOINING_FEE_BASE: 1,
   GST_RATE: 0.18, // 18%
-  JOINING_FEE: 1, // 250 + 18% = 295
+  JOINING_FEE: 295, // 250 + 18% = 295
 
   // Welcome bonus
   WELCOME_BONUS: 50,
